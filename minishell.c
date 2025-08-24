@@ -76,7 +76,7 @@ void add_background_job(pid_t pid, char *command)
             return;
         }
         bg_jobs[bg_job_count].active = 1;
-        printf("[%d] %d\n", bg_job_count + 1, pid);
+        printf("[%d] %d\n", bg_job_count + 1, (int)pid);
         if (fflush(stdout) == EOF) {
             perror("fflush");
         }
@@ -87,8 +87,8 @@ void add_background_job(pid_t pid, char *command)
 /* Handle built-in cd command */
 int handle_builtin_cd(char *v[])
 {
-    if (strcmp(v[0], "cd") == 0) {
-        if (v[1] == NULL) {
+    if (v[0] != NULL && strcmp(v[0], "cd") == 0) {
+        if (v[1] == NULL || strlen(v[1]) == 0) {
             /* cd with no arguments - go to home directory */
             char *home = getenv("HOME");
             if (home == NULL) {
@@ -96,12 +96,12 @@ int handle_builtin_cd(char *v[])
                 return 1;
             }
             if (chdir(home) == -1) {
-                perror("cd");
+                perror("chdir");
             }
         } else {
             /* cd with directory argument */
             if (chdir(v[1]) == -1) {
-                perror("cd");
+                perror("chdir");
             }
         }
         return 1; /* Built-in command handled */
@@ -161,16 +161,21 @@ int main(int argk, char *argv[], char *envp[])
         }
         /* assert i is number of tokens + 1 */
 
-        /* Check for background execution (&) */
-        background = 0;
-        if (i > 1 && strcmp(v[i-1], "&") == 0) {
-            background = 1;
-            v[i-1] = NULL; /* Remove & from arguments */
-        }
-
-        /* Handle built-in commands */
+        /* Handle built-in commands first, before checking for background */
         if (handle_builtin_cd(v)) {
             continue; /* Built-in command was handled */
+        }
+
+        /* Check for background execution (&) */
+        background = 0;
+        if (i > 0) {
+            /* Check if last non-null argument is & */
+            int last_arg = i - 1;
+            if (v[last_arg] != NULL && strcmp(v[last_arg], "&") == 0) {
+                background = 1;
+                v[last_arg] = NULL; /* Remove & from arguments */
+                i--; /* Adjust token count */
+            }
         }
 
         /* fork a child process to exec the command in v[0] */
@@ -192,17 +197,20 @@ int main(int argk, char *argv[], char *envp[])
             {
                 if (background) {
                     /* Background process - don't wait, just track it */
-                    /* Remove newline from original_line for clean display */
-                    char *newline = strchr(original_line, '\n');
-                    if (newline) *newline = '\0';
-                    /* Remove the & from the end for display */
-                    char *amp = strrchr(original_line, '&');
-                    if (amp && amp > original_line && *(amp-1) == ' ') {
-                        *(amp-1) = '\0';
-                    } else if (amp) {
-                        *amp = '\0';
+                    /* Create clean command string for display */
+                    char clean_cmd[NL];
+                    int j, pos = 0;
+                    
+                    for (j = 0; j < i && v[j] != NULL; j++) {
+                        if (j > 0) {
+                            clean_cmd[pos++] = ' ';
+                        }
+                        strcpy(clean_cmd + pos, v[j]);
+                        pos += strlen(v[j]);
                     }
-                    add_background_job(frkRtnVal, original_line);
+                    clean_cmd[pos] = '\0';
+                    
+                    add_background_job(frkRtnVal, clean_cmd);
                 } else {
                     /* Foreground process - wait for completion */
                     if (wait(0) == -1) {
