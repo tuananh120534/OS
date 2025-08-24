@@ -5,15 +5,12 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <signal.h>
-
 #define NV 20 /* max number of command tokens */
 #define NL 100 /* input buffer size */
 char line[NL]; /* command input buffer */
 
-// ADD: track full command line for background jobs
-char fullcmd[NL];
-
-// ADD: job struct
+/* background job tracking */
+// ADD
 int jobCount = 0;
 typedef struct {
     int jobid;
@@ -41,8 +38,7 @@ void check_background_jobs(void) {
         if (jobs[j].pid > 0) {
             pid = waitpid(jobs[j].pid, &status, WNOHANG);
             if (pid > 0) {
-                printf("[%d]+ Done                 %s\n",
-                       jobs[j].jobid, jobs[j].cmd);
+                printf("[%d]+ Done                 %s\n", jobs[j].jobid, jobs[j].cmd);
                 fflush(stdout);
                 jobs[j].pid = -1; // mark finished
             }
@@ -64,11 +60,6 @@ while (1) { /* do Forever */
 prompt();
 fgets(line, NL, stdin);
 fflush(stdin);
-
-// ADD: save full command string
-strncpy(fullcmd, line, NL);
-fullcmd[NL-1] = '\0';
-
 // This if() required for gradescope
 if (feof(stdin)) { /* non-zero on EOF */
 exit(0);
@@ -122,12 +113,7 @@ if (background) {
     jobCount++;
     jobs[jobIndex].jobid = jobCount;
     jobs[jobIndex].pid = frkRtnVal;
-
-    // ADD: save command string (remove &)
-    snprintf(jobs[jobIndex].cmd, NL, "%s", fullcmd);
-    char *amp = strchr(jobs[jobIndex].cmd, '&');
-    if (amp) *amp = '\0';
-
+    snprintf(jobs[jobIndex].cmd, NL, "%s", v[0]);
     jobIndex++;
     printf("[%d] %d\n", jobCount, frkRtnVal);
     fflush(stdout);
