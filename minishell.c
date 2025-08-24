@@ -1,3 +1,13 @@
+/*********************************************************************
+   Program  : miniShell                   Version    : 1.3
+ --------------------------------------------------------------------
+   skeleton code for linix/unix/minix command line interpreter
+ --------------------------------------------------------------------
+   File			: minishell.c
+   Compiler/System	: gcc/linux
+
+********************************************************************/
+
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <stdio.h>
@@ -5,45 +15,98 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <signal.h>
-#define NV 20 /* max number of command tokens */
-#define NL 100 /* input buffer size */
-char line[NL]; /* command input buffer */
 
-/* background job tracking */
-// ADD
-int jobCount = 0;
-typedef struct {
-    int jobid;
+#define NV 20			/* max number of command tokens */
+#define NL 100			/* input buffer size */
+#define MAX_BG_JOBS 50		/* max number of background jobs */
+
+char            line[NL];	/* command input buffer */
+
+/* Structure to track background jobs */
+struct bg_job {
     pid_t pid;
-    char cmd[NL];
-} Job;
-Job jobs[100];
-int jobIndex = 0;
+    char *command;
+    int active;
+} bg_jobs[MAX_BG_JOBS];
+
+int bg_job_count = 0;
 
 /*
-shell prompt
-*/
+	shell prompt
+ */
 void prompt(void)
 {
-// ## REMOVE THIS 'fprintf' STATEMENT BEFORE SUBMISSION
-fprintf(stdout, "\n msh> ");
-fflush(stdout);
+  fprintf(stdout, "\n msh> ");
+  if (fflush(stdout) == EOF) {
+    perror("fflush");
+  }
 }
 
-// ADD: check background jobs
-void check_background_jobs(void) {
+/* Check for completed background jobs */
+void check_background_jobs(void)
+{
     int status;
     pid_t pid;
-    for (int j = 0; j < jobIndex; j++) {
-        if (jobs[j].pid > 0) {
-            pid = waitpid(jobs[j].pid, &status, WNOHANG);
-            if (pid > 0) {
-                printf("[%d]+ Done                 %s\n", jobs[j].jobid, jobs[j].cmd);
-                fflush(stdout);
-                jobs[j].pid = -1; // mark finished
+    int i;
+    
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        for (i = 0; i < bg_job_count; i++) {
+            if (bg_jobs[i].active && bg_jobs[i].pid == pid) {
+                printf("[%d]+ Done                 %s\n", i + 1, bg_jobs[i].command);
+                if (fflush(stdout) == EOF) {
+                    perror("fflush");
+                }
+                bg_jobs[i].active = 0;
+                free(bg_jobs[i].command);
+                bg_jobs[i].command = NULL;
+                break;
             }
         }
     }
+}
+
+/* Add a background job to tracking */
+void add_background_job(pid_t pid, char *command)
+{
+    if (bg_job_count < MAX_BG_JOBS) {
+        bg_jobs[bg_job_count].pid = pid;
+        bg_jobs[bg_job_count].command = strdup(command);
+        if (bg_jobs[bg_job_count].command == NULL) {
+            perror("strdup");
+            return;
+        }
+        bg_jobs[bg_job_count].active = 1;
+        printf("[%d] %d\n", bg_job_count + 1, pid);
+        if (fflush(stdout) == EOF) {
+            perror("fflush");
+        }
+        bg_job_count++;
+    }
+}
+
+/* Handle built-in cd command */
+int handle_builtin_cd(char *v[])
+{
+    if (strcmp(v[0], "cd") == 0) {
+        if (v[1] == NULL) {
+            /* cd with no arguments - go to home directory */
+            char *home = getenv("HOME");
+            if (home == NULL) {
+                fprintf(stderr, "cd: HOME not set\n");
+                return 1;
+            }
+            if (chdir(home) == -1) {
+                perror("cd");
+            }
+        } else {
+            /* cd with directory argument */
+            if (chdir(v[1]) == -1) {
+                perror("cd");
+            }
+        }
+        return 1; /* Built-in command handled */
+    }
+    return 0; /* Not a built-in command */
 }
 
 /* argk - number of arguments */
@@ -51,85 +114,103 @@ void check_background_jobs(void) {
 /* envp - environment pointer */
 int main(int argk, char *argv[], char *envp[])
 {
-int frkRtnVal; /* value returned by fork sys call */
-char *v[NV]; /* array of pointers to command line tokens */
-char *sep = " \t\n"; /* command line token separators */
-int i; /* parse index */
-/* prompt for and process one command line at a time */
-while (1) { /* do Forever */
-prompt();
-fgets(line, NL, stdin);
-fflush(stdin);
-// This if() required for gradescope
-if (feof(stdin)) { /* non-zero on EOF */
-exit(0);
-}
-if (line[0] == '#' || line[0] == '\n' || line[0] == '\000'){
-continue; /* to prompt */
-}
-v[0] = strtok(line, sep);
-for (i = 1; i < NV; i++) {
-v[i] = strtok(NULL, sep);
-if (v[i] == NULL){
-break;
-}
-}
-/* assert i is number of tokens + 1 */
+    int             frkRtnVal;	    /* value returned by fork sys call */
+    char           *v[NV];	        /* array of pointers to command line tokens */
+    char           *sep = " \t\n";  /* command line token separators    */
+    int             i;		          /* parse index */
+    int             background;     /* flag for background execution */
+    char            original_line[NL]; /* store original command for background jobs */
 
-// ADD: built-in cd
-if (v[0] && strcmp(v[0], "cd") == 0) {
-    if (v[1] == NULL) {
-        fprintf(stderr, "cd: missing argument\n");
-    } else if (chdir(v[1]) < 0) {
-        perror("chdir");
-    }
-    check_background_jobs();
-    continue;
-}
+    /* prompt for and process one command line at a time  */
+    while (1) {			/* do Forever */
+        /* Check for completed background jobs before each prompt */
+        check_background_jobs();
+        
+        prompt();
+        if (fgets(line, NL, stdin) == NULL) {
+            if (feof(stdin)) {
+                exit(0);
+            }
+            perror("fgets");
+            continue;
+        }
 
-// ADD: detect background '&'
-int background = 0;
-if (i > 0 && v[i-1] && strcmp(v[i-1], "&") == 0) {
-    background = 1;
-    v[i-1] = NULL; // mark end of args
-}
+        /* This if() required for gradescope */
+        if (feof(stdin)) {		/* non-zero on EOF  */
+            exit(0);
+        }
+        
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\000'){
+            continue;			/* to prompt */
+        }
 
-/* fork a child process to exec the command in v[0] */
-switch (frkRtnVal = fork()) {
-case -1: /* fork returns error to parent process */
-{
-perror("fork"); // ADD
-break;
-}
-case 0: /* code executed only by child process */
-{
-execvp(v[0], v);
-perror("execvp"); // ADD
-exit(1); // ADD
-}
-default: /* code executed only by parent process */
-{
-if (background) {
-    jobCount++;
-    jobs[jobIndex].jobid = jobCount;
-    jobs[jobIndex].pid = frkRtnVal;
-    snprintf(jobs[jobIndex].cmd, NL, "%s", v[0]);
-    jobIndex++;
-    printf("[%d] %d\n", jobCount, frkRtnVal);
-    fflush(stdout);
-} else {
-    if (wait(0) < 0) { // existing line kept
-        perror("wait"); // ADD
-    }
-    // REMOVE PRINTF STATEMENT BEFORE SUBMISSION
-    printf("%s done \n", v[0]);
-}
-break;
-}
-} /* switch */
+        /* Store original line for background job tracking */
+        strcpy(original_line, line);
+        
+        /* Parse command line */
+        v[0] = strtok(line, sep);
+        if (v[0] == NULL) {
+            continue;
+        }
+        
+        for (i = 1; i < NV; i++) {
+            v[i] = strtok(NULL, sep);
+            if (v[i] == NULL){
+                break;
+            }
+        }
+        /* assert i is number of tokens + 1 */
 
-// ADD: check background jobs each loop
-check_background_jobs();
+        /* Check for background execution (&) */
+        background = 0;
+        if (i > 1 && strcmp(v[i-1], "&") == 0) {
+            background = 1;
+            v[i-1] = NULL; /* Remove & from arguments */
+        }
 
-} /* while */
-} /* main */
+        /* Handle built-in commands */
+        if (handle_builtin_cd(v)) {
+            continue; /* Built-in command was handled */
+        }
+
+        /* fork a child process to exec the command in v[0] */
+        switch (frkRtnVal = fork()) {
+            case -1:			/* fork returns error to parent process */
+            {
+                perror("fork");
+                break;
+            }
+            case 0:			/* code executed only by child process */
+            {
+                if (execvp(v[0], v) == -1) {
+                    perror("execvp");
+                    exit(1); /* Terminate child process on exec failure */
+                }
+                break; /* This should never be reached */
+            }
+            default:			/* code executed only by parent process */
+            {
+                if (background) {
+                    /* Background process - don't wait, just track it */
+                    /* Remove newline from original_line for clean display */
+                    char *newline = strchr(original_line, '\n');
+                    if (newline) *newline = '\0';
+                    /* Remove the & from the end for display */
+                    char *amp = strrchr(original_line, '&');
+                    if (amp && amp > original_line && *(amp-1) == ' ') {
+                        *(amp-1) = '\0';
+                    } else if (amp) {
+                        *amp = '\0';
+                    }
+                    add_background_job(frkRtnVal, original_line);
+                } else {
+                    /* Foreground process - wait for completion */
+                    if (wait(0) == -1) {
+                        perror("wait");
+                    }
+                }
+                break;
+            }
+        }				/* switch */
+    }				/* while */
+}				/* main */
