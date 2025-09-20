@@ -225,12 +225,12 @@ int main(int argc, char *argv[])
 		   }
 		}
 		if ( rw == 'R'){
-		    if (debugmode) printf( "reading %8d \n", page_number) ;
+		    if (debugmode) printf( "Reading %8d \n", page_number) ;
 		}
 		else if ( rw == 'W'){
 		    // mark page in page table as written - modified  
 			handleWriteOperation(frame_no);
-		    if (debugmode) printf( "writing %8d \n", page_number) ;
+		    if (debugmode) printf( "Writing %8d \n", page_number) ;
 		}
 		 else {
 		      printf( "Badly formatted file. Error on line %d\n", no_events+1); 
@@ -241,10 +241,10 @@ int main(int argc, char *argv[])
         	do_line = fscanf(trace,"%x %c",&address,&rw);
 	}
 
-	printf( "total memory frames: %d\n", numFrames);
-	printf( "events in trace: %d\n", no_events);
-	printf( "total disk reads: %d\n", disk_reads);
-	printf( "total disk writes: %d\n", disk_writes);
-	printf( "page fault rate: %.4f\n", (float) disk_reads/no_events);
+	printf( "Total memory frames: %d\n", numFrames);
+	printf( "Events in trace: %d\n", no_events);
+	printf( "Total disk reads: %d\n", disk_reads);
+	printf( "Total disk writes: %d\n", disk_writes);
+	printf( "Page fault rate: %.4f\n", (float) disk_reads/no_events);
 }
 				
